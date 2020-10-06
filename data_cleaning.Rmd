@@ -1,0 +1,297 @@
+```{r}
+library(dplyr)
+library(sos)
+library(tidyverse)
+library(sqldf)
+library(RColorBrewer)	
+library(leaps)
+library(mlbench)
+library(caret)
+library(randomForest)
+library(MASS)
+library(pROC)
+library(rpart)
+library(datapasta)
+library(tree)
+library(ade4)
+library(caTools)
+library(rpart)	
+library(rpart.plot)
+library(rattle)
+library(party)					# Alternative decision tree algorithm
+library(partykit)
+library(caret)	
+library(ISLR)
+library(glmnet)
+library(corrplot)
+library(MLmetrics)
+library(reshape2)
+library(randomForest)
+library(car)
+library(scales)
+library(treemap)
+library(plotly)
+library(e1071)
+library(xgboost)
+```
+
+```{r}
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+```
+
+
+```{r}
+data <- read.csv("hotel_bookings.csv", na.strings = " ")
+#data
+str(data)
+data$is_canceled <- as.factor(data$is_canceled)
+#data$children <- as.integer(data$children) - 1
+```
+
+```{r}
+data_box <- data %>%
+  dplyr::select(c(lead_time, stays_in_weekend_nights, stays_in_week_nights, adults, babies, previous_cancellations, previous_bookings_not_canceled, booking_changes, days_in_waiting_list, adr, required_car_parking_spaces, total_of_special_requests, is_canceled))
+
+
+
+boxplot(data_box)
+db <- melt(data_box, id.var = "is_canceled")
+ggplot(data = db, aes(x = variable, y = value)) + geom_boxplot(aes(fill = as.factor(is_canceled))) + coord_flip()
+```
+```{r}
+#taking out negative value for ADR
+data <- data %>%
+  filter(data$adr >= 0)
+min(data$adr)
+Mode(data$adults)
+Mode(data$babies)
+```
+
+adult = 0, children = 0, babies = 0
+```{r}
+data_filter <- sqldf("SELECT * FROM data
+                  WHERE adults <> 0
+                  OR children <> 0
+                  OR babies <> 0")
+#data_filter
+```
+
+Outlier Issue
+
+```{r}
+data1 <- data_filter
+```
+
+```{r}
+#ADR
+#Mode(data_filter$adr)
+#median(data_filter$adr)
+#mean(data_filter$adr)
+#boxplot(data_filter$adr)
+#summary(data_filter$adr)
+
+#oct.adr <- boxplot(data_filter$adr, plot = FALSE)$out
+#min(oct.adr)
+
+#bench_adr <- 126 + 1.5*IQR(data_filter$adr)
+#bench_adr
+
+#data1$adr[data1$adr > 210.75] <- 95 #median #mean
+
+#fig <- plot_ly(data1, y = ~adr, type = "box", color = ~hotel)
+#fig
+```
+
+```{r}
+#market_segment
+Mode(data_filter$market_segment)
+data1$market_segment[data1$market_segment == 'Undefined'] == 'Online TA'
+unique(data1$market_segment)
+
+```
+
+```{r}
+data1$children <- ifelse(data1$children == "0", 0,
+                         ifelse(data1$children == "1", 1,
+                                ifelse(data1$children == "2", 2,
+                                       ifelse(data1$children == "3", 3,
+                                              ifelse(data1$children == "10", 10, "N/A")))))
+data1 <- filter(data1, data1$children != "N/A")
+str(data1$children)
+data1$children <- as.numeric(data1$children) 
+table(data1$children)
+```
+
+
+```{r}
+cc = c("PRT", "GBR", "FRA", "ESP", "DEU", "ITA")
+data1 <- data1 %>%
+  dplyr::mutate(Country1 = ifelse(country == "PRT", "PRT",
+                           ifelse(country == "GBR", "GBR",
+                                  ifelse(country == "FRA", "FRA",
+                                         ifelse(country == "ESP", "ESP",
+                                                ifelse(country == "DEU", "DEU",
+                                                       ifelse(country == "ITA", "ITA",
+                                                              ifelse(country != cc, "Other", "N/A"))))))))
+data1 <- data1 %>%
+  dplyr::select(-c(country))
+```
+
+```{r}
+data_treemap <- data1 %>%
+  dplyr::select(c(Country1)) %>%
+  dplyr::group_by(Country1) %>%
+  dplyr::count(Country1)
+treemap(data_treemap,
+        index = c('Country1','n'),
+        vSize = 'n',
+        vColor = 'n',
+        type = 'value',
+        palette = "Blues",
+        algorithm = 'pivotSize')
+```
+
+```{r}
+dv1 <- data1 %>%
+  group_by(market_segment, hotel) %>%
+  count(market_segment)
+
+ggplot(dv1, aes(x = market_segment, y = n, fill = as.factor(hotel))) + 
+  geom_bar(stat = "identity", position = "dodge")
+```
+
+```{r}
+dv2 <- data1 %>%
+  group_by(meal, hotel) %>%
+  count(meal)
+
+ggplot(dv2, aes(x = meal, y = n, fill = as.factor(hotel))) + geom_bar(stat = "identity", position = "dodge")
+```
+
+```{r}
+dv3 <- data %>%
+  group_by(distribution_channel, hotel) %>%
+  count(distribution_channel)
+
+ggplot(dv3, aes(x = distribution_channel, y = n, fill = as.factor(hotel))) + geom_bar(stat = "identity", position = "dodge")
+```
+
+```{r}
+dv5 <- data %>%
+  group_by(arrival_date_month, hotel) %>%
+  count(is_canceled)
+dv5$arrival_date_month <- factor(dv5$arrival_date_month, levels = month.name)
+
+ggplot(dv5, aes(x = arrival_date_month, y = n, fill = as.factor(hotel))) + geom_bar(stat = "identity", position = "dodge") 
+```
+
+```{r}
+ggplot(data1, aes(x = reserved_room_type, y = adr, fill = as.factor(hotel))) + geom_boxplot()
+
+dv6 <- data1 %>%
+  filter(adr < 4000)
+
+ggplot(dv6, aes(x = reserved_room_type, y = adr, fill = as.factor(hotel))) + geom_boxplot()
+```
+
+```{r}
+ggplot(data1, aes(x = data1$lead_time, fill = data1$hotel, color = data1$hotel, alpha = 0.4)) + geom_histogram(aes(y = ..density..), alpha = 0.5, position = 'identity') + 
+  geom_density(alpha = 0.2)
+```
+
+```{r}
+ggplot(data1, aes(x = stays_in_weekend_nights, fill = as.factor(hotel), color = as.factor(hotel), alpha = 0.4)) + 
+  geom_histogram(aes(y = ..density..), alpha = 0.5, position = 'identity') +
+  geom_density(alpha = 0.2)
+```
+
+```{r}
+ggplot(data1, aes(x = stays_in_week_nights, fill = as.factor(hotel), color = as.factor(hotel), alpha = 0.4)) + 
+  geom_histogram(aes(y = ..density..), alpha = 0.5, position = 'identity') +
+  geom_density(alpha = 0.2)
+```
+
+```{r}
+data1 <- data1 %>%
+  select(-c("reservation_status", "distribution_channel","arrival_date_year","arrival_date_week_number","arrival_date_day_of_month","agent", "company","Country1"))
+```
+
+
+```{r}
+data1 <- as.data.frame(data1)
+data1 <-  data1 %>% 
+  cbind(acm.disjonctif(data1[c("arrival_date_month","meal","market_segment","reserved_room_type", "assigned_room_type", "deposit_type", "customer_type")])) %>% 
+  ungroup()
+
+#Remove the original (non-dummy-coded) variables
+data1 <- data1 %>% 
+  dplyr::select(-c("arrival_date_month","meal","market_segment", "arrival_date_month.January", "meal.Undefined", "market_segment.Undefined", "reserved_room_type", "assigned_room_type", "deposit_type", "customer_type"))
+names(data1)[names(data1) == "market_segment.Online TA"] <- "market_segment.OnlinTA"
+names(data1)[names(data1) == "market_segment.Offline TA/TO"] <- "market_segment.Offline_TA_TO"
+names(data1)[names(data1) == "deposit_type.Non Refund"] <- "deposit_type.Non_Refund"
+#names(data1)[names(data1) == "reservation_status.Check-Out"] <- "reservation_status.Check_Out"
+#names(data1)[names(data1) == "reservation_status.No-Show"] <- "reservation_status.No_Show"
+names(data1)[names(data1) == "customer_type.Transient-Party"] <- "customer_type.Transient_Party"
+```
+
+
+```{r}
+data1$hotel <- as.numeric(data1$hotel) - 1
+data1$is_canceled <- as.numeric(data1$is_canceled) - 1
+table(data1$is_canceled)
+```
+
+```{r}
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+
+data_nor <- data1
+data_nor$lead_time <- normalize(data_nor$lead_time)
+data_nor$stays_in_week_nights <- normalize(data_nor$stays_in_week_nights)
+data_nor$stays_in_weekend_nights <- normalize(data_nor$stays_in_weekend_nights)
+data_nor$adults <- normalize(data_nor$adults)
+#data1$children <- normalize(data1$children)
+data_nor$babies <- normalize(data_nor$babies)
+data_nor$previous_cancellations <- normalize(data_nor$previous_cancellations)
+data_nor$previous_bookings_not_canceled <- normalize(data_nor$previous_bookings_not_canceled)
+data_nor$booking_changes <- normalize(data_nor$booking_changes)
+data_nor$days_in_waiting_list <- normalize(data_nor$days_in_waiting_list)
+data_nor$adr <- normalize(data_nor$adr)
+data_nor$required_car_parking_spaces <- normalize(data_nor$required_car_parking_spaces)
+data_nor$total_of_special_requests <- normalize(data_nor$total_of_special_requests)
+data_nor$children <- normalize(data_nor$children)
+```
+
+```{r}
+y <- as.numeric(data_nor$is_canceled)
+table(y)
+x <- model.matrix(is_canceled ~ hotel + lead_time + adults + babies + is_repeated_guest + previous_cancellations + booking_changes + days_in_waiting_list + adr + total_of_special_requests + arrival_date_month.April + arrival_date_month.August + arrival_date_month.December
+ + arrival_date_month.February + arrival_date_month.July + arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.November + arrival_date_month.October + arrival_date_month.September + meal.FB + meal.BB + meal.HB + meal.SC + deposit_type.Non_Refund + deposit_type.Refundable + customer_type.Group + market_segment.Aviation + market_segment.Complementary + market_segment.Corporate + market_segment.Direct, data = data1)[,-1]
+```
+
+```{r}
+training.samples <- data_nor$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+x.train <- x[training.samples,]
+y.train <- y[training.samples]
+x.test <- x[!training.samples,]
+y.test <- y[!training.samples]
+
+ridge.mod <- glmnet(x.train, y.train, alpha=0, family = "binomial")
+plot(ridge.mod, xvar="lambda", label = T)
+coef(ridge.mod)[,10]
+
+varImp(ridge.mod, lambda = ridge.mod$lambda)
+ridgeImp <- data.frame(varImp(ridge.mod, lambda = ridge.mod$lambda))
+ridgeImp$Vars <- row.names(ridgeImp)
+ggplot(ridgeImp, aes(x = reorder(ridgeImp$Vars, ridgeImp$Overall), y = ridgeImp$Overall, fill = ridgeImp$Overall)) + geom_bar(stat = "identity") + coord_flip()
+```
+
+
+
+
+
