@@ -1,0 +1,471 @@
+
+```{r}
+library(dplyr)
+library(sos)
+library(tidyverse)
+library(sqldf)
+library(RColorBrewer)	
+library(leaps)
+library(mlbench)
+library(caret)
+library(randomForest)
+library(MASS)
+library(pROC)
+library(rpart)
+library(datapasta)
+library(tree)
+library(ade4)
+library(caTools)
+library(rpart)	
+library(rpart.plot)
+library(rattle)
+library(party)					# Alternative decision tree algorithm
+library(partykit)
+library(caret)	
+library(ISLR)
+library(glmnet)
+library(corrplot)
+library(MLmetrics)
+library(reshape2)
+library(randomForest)
+library(car)
+library(scales)
+library(treemap)
+library(plotly)
+library(e1071)
+library(xgboost)
+library(class)
+library(naivebayes)
+```
+
+```{r}
+data <- read.csv("cleaned_data1.csv")
+data <- data %>%
+  dplyr::select(-c(reserved_room_type.P, assigned_room_type.P))
+```
+
+```{r}
+set.seed(123)
+training.samples <- data$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- data[training.samples, ]
+test.data <- data[-training.samples, ]
+```
+
+```{r}
+log_base <- glm(is_canceled ~ ., data = train.data)
+summary(log_base)
+vif <- vif(log_base)
+vif <- data.frame(vif)
+vif$Vars <- row.names(vif)
+vif1 <- sqldf("SELECT * FROM vif
+             WHERE vif < 5")
+vif2 <- sqldf("SELECT * FROM vif
+             ORDER BY vif DESC")
+```
+
+```{r}
+data1 <- data
+```
+
+```{r}
+set.seed(17)
+folds <- createFolds(y = data1[,2],k = 4)
+```
+
+
+```{r}
+max=0
+num=0
+
+rmse_log1 <- as.numeric()
+kappa_log1 <- as.numeric()
+auc_log1 <- as.numeric()
+F1_test_log1 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+fold_pre <- glm(is_canceled ~ ., data=fold_train, family = binomial)
+fold_predict_test <- predict(fold_pre,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log1 <- append(auc_log1, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log1 <- append(kappa_log1, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log1 <- append(rmse_log1, MSE^0.5)
+#F1
+F1_test_log1 <- append(F1_test_log1, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log1))
+print(mean(kappa_log1))
+print(mean(rmse_log1))
+print(mean(F1_test_log1))
+```
+
+```{r}
+max=0
+num=0
+
+rmse_log2 <- as.numeric()
+kappa_log2 <- as.numeric()
+auc_log2 <- as.numeric()
+F1_test_log2 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log2 <- glm(is_canceled ~ . - Market.OnlineTA - Market.Offline_TA_TO - Market.Groups - 	Market.Direct - Market.Corporate - 
+                  Distribution.Direct - Market.Corporate - Distribution.Direct - Distribution.TA_TO - customer_type.Transient_Party - 
+                  customer_type.Transient - reserved_room_type.G - reserved_room_type.H - assigned_room_type.H - assigned_room_type.G, data=fold_train, family = binomial)
+fold_predict_test <- predict(log2,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log2 <- append(auc_log2, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log2 <- append(kappa_log2, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log2 <- append(rmse_log2, MSE^0.5)
+#F1
+F1_test_log2 <- append(F1_test_log2, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log2))
+print(mean(kappa_log2))
+print(mean(rmse_log2))
+print(mean(F1_test_log2))
+#print(mean(F1_train_log1))
+```
+
+
+```{r}
+set.seed(123)
+training.samples <- data1$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- data1[training.samples, ]
+test.data <- data1[-training.samples, ]
+```
+
+
+```{r}
+regfit.bwd <- regsubsets(is_canceled ~ ., data = train.data, nvmax = 62, method = 'backward')
+summary(regfit.bwd)
+sum.regfit_bwd <- summary(regfit.bwd)
+#sum.regfit_bwd$which
+```
+
+```{r}
+which.min(sum.regfit_bwd$bic)
+coef(regfit.bwd, 43)
+which.min(sum.regfit_bwd$cp)
+coef(regfit.bwd, 52)
+which.max(sum.regfit_bwd$adjr2)
+coef(regfit.bwd, 53)
+```
+
+bic
+```{r}
+max=0
+num=0
+
+rmse_log3 <- as.numeric()
+kappa_log3 <- as.numeric()
+auc_log3 <- as.numeric()
+F1_test_log3 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log3 <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + previous_cancellations + previous_bookings_not_canceled + booking_changes + adr + required_car_parking_spaces + total_of_special_requests + arrival_date_month.December + 
+              arrival_date_month.February + arrival_date_month.June + arrival_date_month.March + arrival_date_month.September + Meal.HB + 
+              Market.Complementary + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + 
+              reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + 
+              assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F, + 
+              assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + assigned_room_type.K + deposit_type.Non_Refund + 
+              customer_type.Transient + customer_type.Transient_Party + Distribution.Direct + Distribution.GDS, data=fold_train, family = binomial)
+fold_predict_test <- predict(log3,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log3 <- append(auc_log3, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log3 <- append(kappa_log3, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log3 <- append(rmse_log3, MSE^0.5)
+#F1
+F1_test_log3 <- append(F1_test_log3, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log3))
+print(mean(kappa_log3))
+print(mean(rmse_log3))
+print(mean(F1_test_log3))
+```
+
+cp
+```{r}
+max=0
+num=0
+
+rmse_log4 <- as.numeric()
+kappa_log4 <- as.numeric()
+auc_log4 <- as.numeric()
+F1_test_log4 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log3 <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + is_repeated_guest + 
+              previous_cancellations + previous_bookings_not_canceled + booking_changes + days_in_waiting_list + adr + required_car_parking_spaces + 
+              total_of_special_requests + arrival_date_month.August + arrival_date_month.December + arrival_date_month.February + arrival_date_month.July + 
+              arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.September + Meal.FB + 
+              Meal.HB + Market.Complementary + Market.Corporate + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + 
+              reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + 
+              assigned_room_type.K + assigned_room_type.L + deposit_type.Non_Refund + customer_type.Group + customer_type.Transient + 
+              customer_type.Transient_Party + Distribution.Direct + Distribution.GDS, data=fold_train, family = binomial)
+fold_predict_test <- predict(log3,type ='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log4 <- append(auc_log4, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log4 <- append(kappa_log4, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log4 <- append(rmse_log4, MSE^0.5)
+#F1
+F1_test_log4 <- append(F1_test_log4, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log4))
+print(mean(kappa_log4))
+print(mean(rmse_log4))
+print(mean(F1_test_log4))
+```
+
+adjr2
+```{r}
+max=0
+num=0
+
+rmse_log5 <- as.numeric()
+kappa_log5 <- as.numeric()
+auc_log5 <- as.numeric()
+F1_test_log5 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log3 <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + is_repeated_guest + 
+              previous_cancellations + previous_bookings_not_canceled + booking_changes + days_in_waiting_list + adr + required_car_parking_spaces + 
+              total_of_special_requests + arrival_date_month.August + arrival_date_month.December + arrival_date_month.February + arrival_date_month.July + 
+              arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.October + arrival_date_month.September + Meal.FB + 
+              Meal.HB + Market.Complementary + Market.Corporate + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + 
+              reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + 
+              assigned_room_type.K + assigned_room_type.L + deposit_type.Non_Refund + customer_type.Group + customer_type.Transient + 
+              customer_type.Transient_Party + Distribution.Direct + Distribution.GDS, data=fold_train, family = binomial)
+fold_predict_test <- predict(log3,type ='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log5 <- append(auc_log5, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log5 <- append(kappa_log5, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log5 <- append(rmse_log5, MSE^0.5)
+#F1
+F1_test_log5 <- append(F1_test_log5, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log5))
+print(mean(kappa_log5))
+print(mean(rmse_log5))
+print(mean(F1_test_log5))
+```
+ridge
+
+```{r}
+y <- as.numeric(data1$is_canceled)
+table(y)
+x <- model.matrix(is_canceled ~ ., data = data1)[,-1]
+```
+
+
+```{r}
+data1$is_canceled <- as.factor(data1$is_canceled)
+training.samples <- data1$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+x.train <- x[training.samples,]
+y.train <- y[training.samples]
+x.test <- x[-training.samples,]
+y.test <- y[-training.samples]
+```
+
+```{r}
+lambdas <- 10^seq(2, -3, by = -.1)
+ridge.mod <- glmnet(x.train, y.train, alpha=0, family = 'binomial',lambda = lambdas)
+plot(ridge.mod, xvar="lambda", label = T)
+coef(ridge.mod)[,10]
+probabilities <- ridge.mod %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+SSE <- sum((predicted.classes - y.test)^2)
+RMSE <- sqrt(SSE/nrow(x.test))
+RMSE
+```
+
+```{r}
+cv_ridge <- cv.glmnet(x.train, y.train, alpha = 0, lambda = lambdas)
+optimal_lambda <- cv_ridge$lambda.min
+optimal_lambda
+```
+
+```{r}
+ridge.mod1 <- glmnet(x.train, y.train, alpha=0, family = 'binomial', lambda = 0.001)
+#plot(ridge.mod1, xvar="lambda", label = T, xlim(-4,7))
+coef(ridge.mod1)[,1]
+probabilities1 <- ridge.mod1 %>% predict(newx = x.test)
+predicted.classes1 <- ifelse(probabilities1 > 0.5, 1, 0)
+SSE1 <- sum((predicted.classes1 - y.test)^2)
+RMSE1<- sqrt(SSE1/nrow(x.test))
+RMSE1
+```
+
+```{r}
+varImp(ridge.mod1,lambda = ridge.mod1$lambda)
+ridgeImp <- data.frame(varImp(ridge.mod1, lambda = ridge.mod1$lambda))
+ridgeImp$Vars <- row.names(ridgeImp)
+ggplot(ridgeImp, aes(x = reorder(ridgeImp$Vars, ridgeImp$Overall), y = ridgeImp$Overall)) + geom_bar(stat = "identity", fill = 'Lightblue') + coord_flip()
+ridge_data <- sqldf("SELECT Vars FROM ridgeImp
+      ORDER BY Overall DESC")
+
+#write_csv(ridge_data, "ridge_result.csv")
+```
+
+ridge logisitic regression
+```{r}
+max=0
+num=0
+
+rmse_log6 <- as.numeric()
+kappa_log6 <- as.numeric()
+auc_log6 <- as.numeric()
+F1_test_log6 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log3 <- glm(is_canceled ~ previous_cancellations + required_car_parking_spaces + adr + previous_bookings_not_canceled	+ adults + booking_changes + assigned_room_type.L + deposit_type.Non_Refund + total_of_special_requests + assigned_room_type.I + babies + lead_time + assigned_room_type.G + 
+                assigned_room_type.K + reserved_room_type.G	+ assigned_room_type.F + children	+ stays_in_week_nights + assigned_room_type.H	+ assigned_room_type.E + 
+                reserved_room_type.E + reserved_room_type.F + assigned_room_type.C + reserved_room_type.H	+ reserved_room_type.C + assigned_room_type.D + 
+                reserved_room_type.D + Distribution.GDS	+ stays_in_weekend_nights + reserved_room_type.L + customer_type.Transient + assigned_room_type.B + 
+                Market.Offline_TA_TO + reserved_room_type.B + Market.OnlineTA + Market.Complementary + Distribution.Direct + Meal.FB + is_repeated_guest + 
+                customer_type.Group + days_in_waiting_list + arrival_date_month.July + deposit_type.Refundable + customer_type.Transient_Party +
+                arrival_date_month.September + Meal.HB + arrival_date_month.June + hotel + arrival_date_month.December + arrival_date_month.August + 
+                arrival_date_month.March + arrival_date_month.May	+ arrival_date_month.February, data=fold_train, family = binomial)
+fold_predict_test <- predict(log3,type ='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log6 <- append(auc_log6, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log6 <- append(kappa_log6, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum(((as.numeric(fold_test[,2]) - 1) - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log6 <- append(rmse_log6, MSE^0.5)
+#F1
+F1_test_log6 <- append(F1_test_log6, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log6))
+print(mean(kappa_log6))
+print(mean(rmse_log6))
+print(mean(F1_test_log6))
+```
+
+Ridge Decision Tree
+```{r}
+max=0
+num=0
+
+rmse_log7 <- as.numeric()
+kappa_log7 <- as.numeric()
+auc_log7 <- as.numeric()
+F1_test_log7 <- as.numeric()
+#F1_train_log1 <- as.numeric()
+
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+tree <- rpart(is_canceled ~ previous_cancellations + required_car_parking_spaces + adr + previous_bookings_not_canceled	+ adults + booking_changes + assigned_room_type.L + deposit_type.Non_Refund + total_of_special_requests + assigned_room_type.I + babies + lead_time + assigned_room_type.G + 
+                assigned_room_type.K + reserved_room_type.G	+ assigned_room_type.F + children	+ stays_in_week_nights + assigned_room_type.H	+ assigned_room_type.E + 
+                reserved_room_type.E + reserved_room_type.F + assigned_room_type.C + reserved_room_type.H	+ reserved_room_type.C + assigned_room_type.D + 
+                reserved_room_type.D + Distribution.GDS	+ stays_in_weekend_nights + reserved_room_type.L + customer_type.Transient + assigned_room_type.B + 
+                Market.Offline_TA_TO + reserved_room_type.B + Market.OnlineTA + Market.Complementary + Distribution.Direct + Meal.FB + is_repeated_guest + 
+                customer_type.Group + days_in_waiting_list + arrival_date_month.July + deposit_type.Refundable + customer_type.Transient_Party +
+                arrival_date_month.September + Meal.HB + arrival_date_month.June + hotel + arrival_date_month.December + arrival_date_month.August + 
+                arrival_date_month.March + arrival_date_month.May	+ arrival_date_month.February, data=fold_train)
+fold_predict_test <- predict(tree,type = "class",newdata=fold_test)
+#fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+#fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+#fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log7 <- append(auc_log7, as.numeric(auc((as.numeric(fold_test[,2]) - 1), as.numeric(fold_predict_test))))
+kappa_log7 <- append(kappa_log7, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum(((as.numeric(fold_test[,2]) - 1) - (as.numeric(fold_predict_test) - 1))^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log7 <- append(rmse_log7, MSE^0.5)
+#F1
+F1_test_log7 <- append(F1_test_log7, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+#F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log7))
+print(mean(kappa_log7))
+print(mean(rmse_log7))
+print(mean(F1_test_log7))
+```
+
+Ridge Naive Bayes
+```{r}
+max=0
+num=0
+
+#rmse_log8 <- as.numeric()
+kappa_log8 <- as.numeric()
+auc_log8 <- as.numeric()
+F1_test_log8 <- as.numeric()
+
+for(i in 1:4) {
+nb <- naive_bayes(is_canceled ~ previous_cancellations + required_car_parking_spaces + adr + previous_bookings_not_canceled	+ adults + booking_changes + assigned_room_type.L + deposit_type.Non_Refund + total_of_special_requests + assigned_room_type.I + babies + lead_time + assigned_room_type.G + 
+                assigned_room_type.K + reserved_room_type.G	+ assigned_room_type.F + children	+ stays_in_week_nights + assigned_room_type.H	+ assigned_room_type.E + 
+                reserved_room_type.E + reserved_room_type.F + assigned_room_type.C + reserved_room_type.H	+ reserved_room_type.C + assigned_room_type.D + 
+                reserved_room_type.D + Distribution.GDS	+ stays_in_weekend_nights + reserved_room_type.L + customer_type.Transient + assigned_room_type.B + 
+                Market.Offline_TA_TO + reserved_room_type.B + Market.OnlineTA + Market.Complementary + Distribution.Direct + Meal.FB + is_repeated_guest + 
+                customer_type.Group + days_in_waiting_list + arrival_date_month.July + deposit_type.Refundable + customer_type.Transient_Party +
+                arrival_date_month.September + Meal.HB + arrival_date_month.June + hotel + arrival_date_month.December + arrival_date_month.August + 
+                arrival_date_month.March + arrival_date_month.May	+ arrival_date_month.February, data=fold_train)
+fold_predict_test <- predict(nb,type='class',newdata=fold_test)
+auc_log8 <- append(auc_log8, as.numeric(auc(as.numeric(fold_test[,2]), as.numeric(fold_predict_test))))
+kappa_log8 <- append(kappa_log8, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+
+#F1
+F1_test_log8 <- append(F1_test_log8, as.numeric(F1_Score(fold_test[,2], fold_predict_test, positive = 1)))
+}
+print(mean(auc_log8))
+print(mean(kappa_log8))
+print(mean(F1_test_log8))
+
+```
+
