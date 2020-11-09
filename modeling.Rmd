@@ -1,0 +1,348 @@
+
+import package
+```{r}
+library(dplyr)
+library(sos)
+library(tidyverse)
+library(sqldf)
+library(RColorBrewer)	
+library(leaps)
+library(mlbench)
+library(caret)
+library(randomForest)
+library(MASS)
+library(pROC)
+library(rpart)
+library(datapasta)
+library(tree)
+library(ade4)
+library(caTools)
+library(rpart)	
+library(rpart.plot)
+library(rattle)
+library(party)					# Alternative decision tree algorithm
+library(partykit)
+library(caret)	
+library(ISLR)
+library(glmnet)
+library(corrplot)
+library(MLmetrics)
+library(reshape2)
+library(randomForest)
+library(car)
+library(scales)
+library(treemap)
+library(plotly)
+library(e1071)
+library(xgboost)
+library(class)
+library(naivebayes)
+```
+
+import dataset
+```{r}
+data <- read.csv("cleaned_data.csv")
+data <- data %>%
+  dplyr::select(-c(reservation_status_date))
+data
+```
+
+```{r}
+set.seed(123)
+training.samples <- data$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- data[training.samples, ]
+test.data <- data[-training.samples, ]
+```
+
+
+Perform a logistic regression as baseline model
+```{r}
+log_base <- glm(is_canceled ~ . - reserved_room_type.P - assigned_room_type.P, data = train.data)
+summary(log_base)
+vif <- vif(log_base)
+vif <- data.frame(vif)
+vif$Vars <- row.names(vif)
+vif <- sqldf("SELECT * FROM vif
+             WHERE vif < 5")
+
+```
+
+```{r}
+data1 <- data %>%
+  dplyr::select(-c(reserved_room_type.P, assigned_room_type.P))
+```
+
+```{r}
+set.seed(17)
+folds <- createFolds(y = data1[,2],k = 4)
+```
+
+
+```{r}
+max=0
+num=0
+rmse_log1 <- as.numeric()
+kappa_log1 <- as.numeric()
+auc_log1 <- as.numeric()
+F1_test_log1 <- as.numeric()
+F1_train_log1 <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+fold_pre <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + is_repeated_guest + previous_cancellations + previous_bookings_not_canceled + booking_changes + days_in_waiting_list + adr + required_car_parking_spaces + total_of_special_requests + arrival_date_month.April + arrival_date_month.August + arrival_date_month.December + arrival_date_month.February + arrival_date_month.July + arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.November + arrival_date_month.October + arrival_date_month.September + Meal.BB + Meal.FB + Meal.HB + Market.Complementary + reserved_room_type.B + reserved_room_type.C + reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.L + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.I + assigned_room_type.K + assigned_room_type.L + deposit_type.Non_Refund + deposit_type.Refundable + customer_type.Group, data=fold_train, family = binomial)
+fold_predict_test <- predict(fold_pre,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(fold_pre,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log1 <- append(auc_log1, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log1 <- append(kappa_log1, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log1 <- append(rmse_log1, MSE^0.5)
+#F1
+F1_test_log1 <- append(F1_test_log1, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+F1_train_log1 <- append(F1_train_log1, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log1))
+print(mean(kappa_log1))
+print(mean(rmse_log1))
+print(mean(F1_test_log1))
+print(mean(F1_train_log1))
+```
+
+
+
+
+Backward Stepwise Regression
+
+```{r}
+set.seed(123)
+training.samples <- data1$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- data1[training.samples, ]
+test.data <- data1[-training.samples, ]
+```
+
+
+```{r}
+regfit.bwd <- regsubsets(is_canceled ~ ., data = train.data, nvmax = 58, method = 'backward')
+summary(regfit.bwd)
+sum.regfit_bwd <- summary(regfit.bwd)
+#sum.regfit_bwd$which
+```
+
+```{r}
+which.min(sum.regfit_bwd$bic)
+coef(regfit.bwd, 42)
+which.min(sum.regfit_bwd$cp)
+coef(regfit.bwd, 50)
+which.max(sum.regfit_bwd$adjr2)
+coef(regfit.bwd, 52)
+```
+
+
+BIC
+```{r}
+max=0
+num=0
+rmse_log_bic <- as.numeric()
+kappa_log_bic <- as.numeric()
+auc_log_bic <- as.numeric()
+F1_test_log_bic <- as.numeric()
+F1_train_log_bic <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log_bic <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + previous_cancellations + previous_bookings_not_canceled + booking_changes + adr + required_car_parking_spaces+ total_of_special_requests + arrival_date_month.December + arrival_date_month.February + arrival_date_month.June + arrival_date_month.March + arrival_date_month.September + Meal.HB + Market.Complementary + Market.Direct + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + assigned_room_type.K + deposit_type.Non_Refund + customer_type.Transient + customer_type.Transient_Party, data = fold_train, family = "binomial")
+fold_predict_test <- predict(log_bic,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(log_bic,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log_bic <- append(auc_log_bic, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log_bic <- append(kappa_log_bic, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log_bic <- append(rmse_log_bic, MSE^0.5)
+#F1
+F1_test_log_bic <- append(F1_test_log_bic, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+F1_train_log_bic <- append(F1_train_log_bic, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log_bic))
+print(mean(kappa_log_bic))
+print(mean(rmse_log_bic))
+print(mean(F1_test_log_bic))
+print(mean(F1_train_log_bic))
+```
+
+CP
+```{r}
+max=0
+num=0
+rmse_log_cp <- as.numeric()
+kappa_log_cp <- as.numeric()
+auc_log_cp <- as.numeric()
+F1_test_log_cp <- as.numeric()
+F1_train_log_cp <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log_cp <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + is_repeated_guest + previous_cancellations + previous_bookings_not_canceled + booking_changes + days_in_waiting_list + adr + required_car_parking_spaces + total_of_special_requests + arrival_date_month.August + arrival_date_month.December + arrival_date_month.February + arrival_date_month.July + arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.September + Meal.FB + Meal.HB + Market.Complementary + Market.Direct + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + assigned_room_type.K + assigned_room_type.L + deposit_type.Non_Refund + customer_type.Group + customer_type.Transient + customer_type.Transient_Party, data = fold_train, family = "binomial")
+fold_predict_test <- predict(log_cp,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(log_cp,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log_cp <- append(auc_log_cp, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log_cp <- append(kappa_log_cp, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log_cp <- append(rmse_log_cp, MSE^0.5)
+#F1
+F1_test_log_cp <- append(F1_test_log_cp, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+F1_train_log_cp <- append(F1_train_log_cp, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log_cp))
+print(mean(kappa_log_cp))
+print(mean(rmse_log_cp))
+print(mean(F1_test_log_cp))
+print(mean(F1_train_log_cp))
+```
+
+adjr2
+```{r}
+max=0
+num=0
+rmse_log_adjr2 <- as.numeric()
+kappa_log_adjr2 <- as.numeric()
+auc_log_adjr2 <- as.numeric()
+F1_test_log_adjr2 <- as.numeric()
+F1_train_log_adjr2 <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log_adj2 <- glm(is_canceled ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + children + babies + is_repeated_guest + previous_cancellations + previous_bookings_not_canceled + booking_changes + days_in_waiting_list + adr + required_car_parking_spaces + total_of_special_requests + arrival_date_month.August + arrival_date_month.December + arrival_date_month.February + arrival_date_month.July + arrival_date_month.June + arrival_date_month.March + arrival_date_month.May + arrival_date_month.October + arrival_date_month.September + Meal.FB + Meal.HB + Market.Complementary + Market.Corporate + Market.Direct + Market.Offline_TA_TO + Market.OnlineTA + reserved_room_type.B + reserved_room_type.C + reserved_room_type.D + reserved_room_type.E + reserved_room_type.F + reserved_room_type.G + reserved_room_type.H + assigned_room_type.B + assigned_room_type.C + assigned_room_type.D + assigned_room_type.E + assigned_room_type.F + assigned_room_type.G + assigned_room_type.H + assigned_room_type.I + assigned_room_type.K + assigned_room_type.L + deposit_type.Non_Refund + customer_type.Group + customer_type.Transient + customer_type.Transient_Party, data = fold_train, family = "binomial")
+fold_predict_test <- predict(log_adj2,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(log_adj2,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log_adjr2 <- append(auc_log_adjr2, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log_adjr2 <- append(kappa_log_adjr2, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log_adjr2 <- append(rmse_log_adjr2, MSE^0.5)
+#F1
+F1_test_log_adjr2 <- append(F1_test_log_adjr2, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+F1_train_log_adjr2 <- append(F1_train_log_adjr2, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log_adjr2))
+print(mean(kappa_log_adjr2))
+print(mean(rmse_log_adjr2))
+print(mean(F1_test_log_adjr2))
+print(mean(F1_train_log_adjr2))
+```
+
+Perform a ridge Regression
+```{r}
+y <- as.numeric(data1$is_canceled)
+table(y)
+x <- model.matrix(is_canceled ~ ., data = data1)[,-1]
+```
+
+```{r}
+training.samples <- data1$is_canceled %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+x.train <- x[training.samples,]
+y.train <- y[training.samples]
+x.test <- x[-training.samples,]
+y.test <- y[-training.samples]
+```
+
+```{r}
+# Using cross validation glmnet
+lambdas <- 10^seq(2, -3, by = -.1)
+ridge.mod <- glmnet(x.train, y.train, alpha=0, family = 'binomial',lambda = lambdas)
+plot(ridge.mod, xvar="lambda", label = T)
+coef(ridge.mod)[,10]
+probabilities <- ridge.mod %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+SSE <- sum((predicted.classes - y.test)^2)
+RMSE <- sqrt(SSE/nrow(x.test))
+RMSE
+```
+
+```{r}
+cv_ridge <- cv.glmnet(x.train, y.train, alpha = 0, lambda = lambdas)
+optimal_lambda <- cv_ridge$lambda.min
+optimal_lambda
+```
+
+
+```{r}
+ridge.mod1 <- glmnet(x.train, y.train, alpha=0, family = 'binomial', lambda = 0.001)
+#plot(ridge.mod1, xvar="lambda", label = T, xlim(-4,7))
+coef(ridge.mod1)[,1]
+probabilities1 <- ridge.mod1 %>% predict(newx = x.test)
+predicted.classes1 <- ifelse(probabilities1 > 0.5, 1, 0)
+SSE1 <- sum((predicted.classes1 - y.test)^2)
+RMSE1<- sqrt(SSE1/nrow(x.test))
+RMSE1
+```
+
+```{r}
+varImp(ridge.mod1,lambda = ridge.mod1$lambda)
+ridgeImp <- data.frame(varImp(ridge.mod1, lambda = ridge.mod1$lambda))
+ridgeImp$Vars <- row.names(ridgeImp)
+ggplot(ridgeImp, aes(x = reorder(ridgeImp$Vars, ridgeImp$Overall), y = ridgeImp$Overall)) + geom_bar(stat = "identity", fill = 'Lightblue') + coord_flip()
+ridge_data <- sqldf("SELECT * FROM ridgeImp
+      ORDER BY Overall DESC")
+#write_csv(ridge_data, "ridge_result.csv")
+```
+
+```{r}
+max=0
+num=0
+rmse_log_rid <- as.numeric()
+kappa_log_rid <- as.numeric()
+auc_log_rid <- as.numeric()
+F1_test_log_rid <- as.numeric()
+F1_train_log_rid <- as.numeric()
+for(i in 1:4) {
+fold_test <- data1[folds[[i]],] #取folds[[i]]作为测试集
+fold_train <- data1[-folds[[i]],] # 剩下的数据作为训练集
+log_rid <- glm(is_canceled ~ previous_cancellations + required_car_parking_spaces + adr + previous_bookings_not_canceled + adults + booking_changes + deposit_type.Non_Refund + assigned_room_type.L + assigned_room_type.I + total_of_special_requests + lead_time + reserved_room_type.G + children + stays_in_week_nights + assigned_room_type.K + assigned_room_type.H + assigned_room_type.E + reserved_room_type.E + reserved_room_type.F + reserved_room_type.H + assigned_room_type.C + assigned_room_type.D + reserved_room_type.L + reserved_room_type.C + reserved_room_type.D + stays_in_weekend_nights + customer_type.Transient + Market.OnlineTA	+ Market.Offline_TA_TO + assigned_room_type.B + reserved_room_type.B + Meal.FB + Market.Direct + days_in_waiting_list + is_repeated_guest + 
+                 customer_type.Group + arrival_date_month.July + Market.Complementary + arrival_date_month.September + customer_type.Transient_Party + 
+                 arrival_date_month.August + arrival_date_month.June + deposit_type.Refundable + arrival_date_month.March + Meal.HB + hotel + arrival_date_month.May + 
+                 arrival_date_month.December + arrival_date_month.February, data = fold_train, family = "binomial")
+fold_predict_test <- predict(log_rid,type='response',newdata=fold_test)
+fold_predict_test <- ifelse(fold_predict_test > 0.5, 1, 0)
+fold_predict_train <- predict(log_rid,type='response',newdata=fold_train)
+fold_predict_train <- ifelse(fold_predict_train > 0.5, 1, 0)
+auc_log_rid <- append(auc_log_rid, as.numeric(auc(as.numeric(fold_test[,2]), fold_predict_test)))
+kappa_log_rid <- append(kappa_log_rid, confusionMatrix(as.factor(fold_test[,2]), as.factor(fold_predict_test))$overall['Kappa'])
+#rmse
+RSS <- sum((fold_test[,2] - fold_predict_test)^2)
+MSE <- RSS/nrow(fold_test)
+rmse_log_rid <- append(rmse_log_rid, MSE^0.5)
+#F1
+F1_test_log_rid <- append(F1_test_log_rid, as.numeric(F1_Score(as.factor(fold_test[,2]), as.factor(fold_predict_test), positive = 1)))
+F1_train_log_rid <- append(F1_train_log_rid, as.numeric(F1_Score(as.factor(fold_train[,2]), as.factor(fold_predict_train), positive = 1)))
+}
+print(mean(auc_log_rid))
+print(mean(kappa_log_rid))
+print(mean(rmse_log_rid))
+print(mean(F1_test_log_rid))
+print(mean(F1_train_log_rid))
+```
+
++ Market.Direct + days_in_waiting_list + is_repeated_guest + customer_type.Group + arrival_date_month.July + Market.Complementary + arrival_date_month.September + customer_type.Transient_Party + arrival_date_month.August + arrival_date_month.June + deposit_type.Refundable + arrival_date_month.March + Meal.HB + hotel + arrival_date_month.May + arrival_date_month.December + arrival_date_month.February
+
+
+
+
+
+
+
